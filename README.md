@@ -83,7 +83,9 @@ service automates that. (You can always run that restart by hand to confirm.)
 Once `wpctl status` lists `ov5693` / `ov8865` under **Video → `[libcamera]`**:
 
 ```bash
-qcam                     # GUI live preview (front: pick "Internal front camera")
+qcam                     # GUI live preview of the front camera
+# rear camera live in qcam needs a forced native resolution (see rear-camera note below):
+qcam -c '\_SB_.PCI0.LNK0' -s role=viewfinder,width=1632,height=1224
 snap-photo.sh both       # save a still from each camera to ~/Downloads
 snap-photo.sh front --video   # ~5 s mp4 clip from the front camera
 libcamerify cheese       # run any V4L2-only app through a libcamera shim
@@ -195,8 +197,15 @@ userspace layer this repo sets up. Workarounds:
 
 - **Stills/clips:** use `snap-photo.sh back`, which drives the rear camera at its working
   native mode.
-- **Apps:** if the app lets you pick a resolution, choose ≥1632×1224. Cheese and most
-  video-call sites don't, so the rear camera is effectively front-only for them.
+- **Live preview that works:** `qcam` (libcamera's own GUI viewer) lets you force the
+  resolution, so the rear camera streams fine there:
+  ```bash
+  qcam -c '\_SB_.PCI0.LNK0' -s role=viewfinder,width=1632,height=1224
+  ```
+  (libcamera adjusts this to 1600×1224 — the IPU3 aligns width down. The front camera is
+  just `qcam` with no args, or `-c '\_SB_.PCI0.LNK1'`.)
+- **Other apps (Cheese, Zoom, browsers):** they auto-pick 640×480/1280×720 with no way to
+  override, so the rear camera **stalls/freezes** in them — it's effectively front-only there.
 - **Real fix:** a kernel patch to the `ov8865` driver (account for the embedded-data
   lines / fix the small-mode frame size). Track it with linux-surface; not done here.
 
