@@ -98,8 +98,21 @@ versions. Pick "Internal front camera" in the site's camera dropdown.
 
 These apps **don't** speak libcamera or the PipeWire camera portal, so the IPU3 cameras
 never show up in them. (And `libcamerify` doesn't help on Ubuntu 24.04 — its
-`v4l2-compat.so` shim isn't built.) The fix is a **virtual webcam**: a `v4l2loopback`
-device fed by the front camera through GStreamer, which any V4L2 app can see.
+`v4l2-compat.so` shim isn't built.)
+
+> ### ⚠ Easiest path: use the **web client** instead
+> Zoom, Teams, Meet and friends all have a browser version, and **Firefox/Chromium reach
+> the front camera through the PipeWire portal that already works** (see above). Joining a
+> call at `app.zoom.us` / `teams.microsoft.com` in the browser needs **zero** extra setup
+> and avoids the v4l2loopback mess below. (Snap Firefox may need `snap connect
+> firefox:camera` once.) **Recommended.**
+
+If you specifically need a **native** V4L2-only app, the only option is a **virtual webcam**:
+a `v4l2loopback` device fed by the front camera. **Heads-up — this currently does NOT work
+on kernel ≥ 6.18:** Ubuntu's v4l2loopback 0.12.7 builds (with the fix script below) but then
+**kernel-oopses at runtime in `vidioc_reqbufs`** — the device appears but delivers no frames,
+because 6.18 reworked the V4L2 buffer framework. You'd need a newer v4l2loopback that
+supports 6.18. The setup below is kept for older kernels / future fixed packages.
 
 One-time setup (needs sudo):
 
