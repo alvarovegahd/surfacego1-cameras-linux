@@ -105,7 +105,18 @@ One-time setup (needs sudo):
 
 ```bash
 sudo apt install -y v4l2loopback-dkms
-# load now:
+```
+
+> **Kernel ≥ 6.18 note:** Ubuntu's v4l2loopback 0.12.7 **fails to build** on Linux 6.18
+> (the `v4l2_fh_add()`/`v4l2_fh_del()` API gained a `struct file *` argument). If the apt
+> install above ends with a DKMS build error, run the bundled fix and it'll patch, rebuild,
+> and load the module:
+> ```bash
+> sudo ./fix-v4l2loopback-kernel6.18.sh
+> ```
+
+```bash
+# load now (if not already loaded by the fix script):
 sudo modprobe v4l2loopback video_nr=20 card_label="Surface Front Camera" exclusive_caps=1
 # (optional) auto-load at boot:
 echo v4l2loopback | sudo tee /etc/modules-load.d/v4l2loopback.conf
