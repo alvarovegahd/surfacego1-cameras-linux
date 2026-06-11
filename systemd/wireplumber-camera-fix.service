@@ -1,0 +1,15 @@
+[Unit]
+Description=Re-scan cameras after IPU3 sensors are up (Surface Go libcamera fix)
+# WirePlumber's libcamera monitor enumerates cameras only at startup. On the
+# Surface Go the IPU3 sensors finish probing slightly after WirePlumber starts,
+# so at login it sees no cameras and never re-scans. This oneshot waits for the
+# sensor subdev nodes, then bounces WirePlumber so it picks the cameras up.
+After=graphical-session.target wireplumber.service
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -lc 'for i in $(seq 1 30); do [ -e /dev/v4l-subdev0 ] && break; sleep 1; done; wpctl status 2>/dev/null | grep -qiE "ov5693|ov8865" || systemctl --user restart wireplumber'
+
+[Install]
+WantedBy=graphical-session.target

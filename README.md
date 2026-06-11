@@ -1,1 +1,153 @@
-# surfacego1-cameras-linux
+# Surface Go (gen 1) cameras on Linux
+
+Getting the **front and rear cameras working on the Microsoft Surface Go (1st gen)**
+under Linux — both the 5 MP front (`ov5693`) and 8 MP rear (`ov8865`) cameras, live,
+in browsers and video-call apps.
+
+> **TL;DR** — On a modern [linux-surface](https://github.com/linux-surface/linux-surface)
+> kernel the cameras are **not a kernel problem any more**. The drivers, sensors, power
+> and the Intel IPU3 pipeline all work. The only gap is *integration*: the IPU3 emits
+> **raw Bayer** that must be processed by **libcamera**, and your desktop needs to be
+> told to use libcamera (via PipeWire) instead of expecting a plain `/dev/video` webcam.
+> This repo automates that. Run [`./setup.sh`](setup.sh) and reboot.
+
+---
+
+## Why the cameras "don't work" out of the box
+
+The Surface Go cameras hang off the **Intel IPU3** image-processing unit, not a normal
+UVC webcam. Two things follow from that:
+
+1. The sensors (`ov5693`, `ov8865`, plus the `ov7251` IR cam) are described in **ACPI**
+   and wired over **I²C/CSI-2**, powered by an `INT3472`/`TPS68470` PMIC. They need the
+   right kernel drivers *and* ACPI bridging. Older kernels lacked this — hence the old
+   "deep kernel issue" reputation. **Recent linux-surface kernels have it all.**
+2. The IPU3 CIO2 only produces **raw 10-bit Bayer** frames. A normal app (Cheese, a
+   browser, Zoom, OBS) opens `/dev/video*` expecting YUV/MJPEG and gets nothing usable.
+   You need **libcamera** to drive the CIO2 → ImgU pipeline and do debayer + 3A, and a
+   bridge so ordinary apps can consume it.
+
+So the fix is **not** patching the kernel — it's wiring libcamera into the desktop.
+
+## Is my system ready? (kernel side)
+
+You need a linux-surface kernel where the sensors are bound. Check:
+
+```bash
+# sensors present as subdevices?
+media-ctl -d /dev/media0 -p | grep -E 'ov5693|ov8865|ov7251'
+# expect lines like:  entity NN: ov5693 4-0036 ... subtype Sensor
+ls /dev/v4l-subdev*           # several nodes = sensors bound
+
+# the relevant modules should be loaded:
+lsmod | grep -E 'ipu3_cio2|ipu3_imgu|ov5693|ov8865|int3472|tps68470|ipu_bridge'
+
+# and libcamera should enumerate two cameras:
+cam --list
+#   1: Internal back camera  (\_SB_.PCI0.LNK0)
+#   2: Internal front camera (\_SB_.PCI0.LNK1)
+```
+
+If `cam --list` shows the two cameras, **the hard part is already done** — go to the fix.
+If not, you likely need a newer linux-surface kernel first.
+
+## The fix
+
+```bash
+git clone https://github.com/alvarovegahd/surfacego1-cameras-linux
+cd surfacego1-cameras-linux
+./setup.sh        # user-space only, no sudo, nothing destructive
+# log out / reboot once so the PipeWire camera + env changes take hold everywhere
+```
+
+`setup.sh` does five small things, all in your home dir:
+
+| Step | What | Where |
+|---|---|---|
+| Tuning aliases | Copy libcamera's `uncalibrated.yaml` to `ov5693.yaml` / `ov8865.yaml` / `ov7251.yaml` so libcamera stops erroring on missing per-sensor tuning | `~/.local/share/libcamera/ipa/ipu3/` |
+| Env | Point libcamera at those files | `~/.config/environment.d/90-libcamera.conf` |
+| PipeWire re-scan | A user service that restarts WirePlumber after the sensors are up, so the cameras reliably appear in PipeWire | `~/.config/systemd/user/wireplumber-camera-fix.service` |
+| Helper | `snap-photo.sh` capture tool | `~/.local/bin/` |
+| Apply now | `set-environment` + restart WirePlumber, then verify | — |
+
+### Why the PipeWire re-scan service is needed
+
+WirePlumber's libcamera monitor enumerates cameras **once at startup**. On the Surface Go
+the IPU3 sensors finish probing slightly *after* WirePlumber starts, so at login it finds
+no cameras and never looks again — you get only the useless raw `ipu3-imgu`/`CIO2` V4L2
+nodes. A single `systemctl --user restart wireplumber` after boot fixes it; the bundled
+service automates that. (You can always run that restart by hand to confirm.)
+
+## Using the cameras
+
+Once `wpctl status` lists `ov5693` / `ov8865` under **Video → `[libcamera]`**:
+
+```bash
+qcam                     # GUI live preview (front: pick "Internal front camera")
+snap-photo.sh both       # save a still from each camera to ~/Downloads
+snap-photo.sh front --video   # ~5 s mp4 clip from the front camera
+libcamerify cheese       # run any V4L2-only app through a libcamera shim
+libcamerify zoom         # …same for Zoom, OBS (or use OBS's PipeWire source), etc.
+```
+
+**Browsers & video calls:** Firefox and Chromium reach libcamera cameras through the
+**PipeWire camera portal** automatically once the nodes exist — no flags needed on recent
+versions. Pick "Internal front camera" in the site's camera dropdown.
+
+### `snap-photo.sh`
+
+```
+snap-photo.sh                 # photo from BOTH cameras  -> ~/Downloads
+snap-photo.sh front           # front only
+snap-photo.sh back ~/Pictures # back camera, custom dir
+snap-photo.sh front --video   # short mp4 clip
+```
+
+It captures a burst with `cam` (raw NV12) and keeps the last frame — the first frames are
+dark while auto-exposure settles, so single-frame grabs come out black.
+
+## Honest caveats
+
+- **Image quality is "functional, not pretty."** The IPU3 libcamera IPA ships **no
+  calibrated tuning for any sensor** — upstream only has `uncalibrated.yaml`, and there are
+  no `ov5693`/`ov8865` tuning files to download (we checked). Color/auto-exposure are
+  therefore uncalibrated: usable for video calls and monitoring, a bit flat/odd on color.
+  The aliases here only silence the "file not found" error; they don't add calibration.
+- **No Windows Hello / IR face login.** The `ov7251` IR camera enumerates but isn't wired
+  up here.
+- Autofocus (`dw9719` VCM) is present on the rear camera but not exposed as a nice control.
+
+## How it was diagnosed (for the curious)
+
+- `lspci` shows the IPU3: `8086:1919` Imaging Unit (`00:05.0`) + `8086:9d32` CSI-2 host
+  (`00:14.3`).
+- `media-ctl` shows all three sensors **bound and linked** into `ipu3-csi2` → `ipu3-cio2`,
+  with `dw9719` (focus) and `INT3472`/`tps68470` (power/clocks) loaded.
+- `cam --capture` pulls real frames at ~28 fps; the front node reports
+  `ip3G` (10-bit Bayer IPU3-packed) — confirming raw output that needs libcamera.
+- `wpctl status` initially exposed only raw `ipu3-imgu`/`CIO2` V4L2 devices and **no
+  Sources**; restarting WirePlumber made `ov5693`/`ov8865` `[libcamera]` nodes appear.
+
+## Tested environment
+
+| | |
+|---|---|
+| Device | Surface Go (1st gen), BIOS `1.0.38` |
+| OS | Ubuntu 24.04.4 LTS |
+| Kernel | `6.18.7-surface-1` (linux-surface) |
+| libcamera | 0.2.0 |
+| PipeWire / WirePlumber | 1.0.5 / 0.4.17 |
+| Sensors | `ov5693` front (i²c 4-0036), `ov8865` rear (i²c 2-0010), `ov7251` IR (i²c 3-0060), `dw9719` VCM |
+
+Newer distros ship WirePlumber 0.5 (different config format) — the env + tuning steps are
+identical; the re-scan service may be unnecessary if your WirePlumber already rescans.
+
+## Credits
+
+Built on the work of the [linux-surface](https://github.com/linux-surface/linux-surface)
+project (kernel + ACPI) and [libcamera](https://libcamera.org/) (IPU3 pipeline).
+This repo is just the desktop-integration glue + docs.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
