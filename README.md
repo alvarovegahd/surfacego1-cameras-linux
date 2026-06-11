@@ -106,13 +106,46 @@ snap-photo.sh front --video   # short mp4 clip
 It captures a burst with `cam` (raw NV12) and keeps the last frame — the first frames are
 dark while auto-exposure settles, so single-frame grabs come out black.
 
-## Honest caveats
+## Known issue: the REAR camera stalls in low-res modes
+
+The **front camera (`ov5693`) works everywhere** — Cheese, browsers, video calls.
+
+The **rear camera (`ov8865`) only streams in its native/binned resolutions.** In the
+small modes that most apps default to (640×480, 1280×720) it delivers **exactly one frame
+and then stalls** — so Cheese/Zoom show a frozen first frame ("stuck"). The kernel log
+shows the cause, a CSI-2 payload-length mismatch (the sensor sends ~one extra line of
+embedded data the driver doesn't account for):
+
+```
+ipu3-cio2 0000:00:14.3: payload length is 2585088, received 2588672
+```
+
+Measured on this device:
+
+| Requested size | Rear camera |
+|---|---|
+| 640×480 | ❌ 1 frame then stall |
+| 1280×720 | ❌ 1 frame then stall |
+| **1632×1224** (→ aligned 1600×1224) | ✅ streams |
+| **3264×2448** (native) | ✅ streams |
+
+This is a **kernel sensor-driver quirk, below libcamera** — it can't be fixed from the
+userspace layer this repo sets up. Workarounds:
+
+- **Stills/clips:** use `snap-photo.sh back`, which drives the rear camera at its working
+  native mode.
+- **Apps:** if the app lets you pick a resolution, choose ≥1632×1224. Cheese and most
+  video-call sites don't, so the rear camera is effectively front-only for them.
+- **Real fix:** a kernel patch to the `ov8865` driver (account for the embedded-data
+  lines / fix the small-mode frame size). Track it with linux-surface; not done here.
+
+## Other caveats
 
 - **Image quality is "functional, not pretty."** The IPU3 libcamera IPA ships **no
   calibrated tuning for any sensor** — upstream only has `uncalibrated.yaml`, and there are
   no `ov5693`/`ov8865` tuning files to download (we checked). Color/auto-exposure are
-  therefore uncalibrated: usable for video calls and monitoring, a bit flat/odd on color.
-  The aliases here only silence the "file not found" error; they don't add calibration.
+  therefore uncalibrated: usable for video calls and monitoring, a bit flat/over-exposed on
+  color. The aliases here only silence the "file not found" error; they don't add calibration.
 - **No Windows Hello / IR face login.** The `ov7251` IR camera enumerates but isn't wired
   up here.
 - Autofocus (`dw9719` VCM) is present on the rear camera but not exposed as a nice control.
