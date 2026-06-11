@@ -26,9 +26,10 @@ if ! ls /dev/v4l-subdev0 >/dev/null 2>&1; then
 fi
 echo "    OK: $(ls /dev/v4l-subdev* | wc -l) subdev nodes present."
 
-say "2/6  Installing snap-photo.sh → ~/.local/bin"
+say "2/6  Installing helper scripts → ~/.local/bin"
 mkdir -p "$HOME/.local/bin"
 install -m 0755 "$REPO/snap-photo.sh" "$HOME/.local/bin/snap-photo.sh"
+install -m 0755 "$REPO/front-camera-loopback.sh" "$HOME/.local/bin/front-camera-loopback.sh"
 
 say "3/6  Installing IPU3 tuning aliases → ~/.local/share/libcamera/ipa/ipu3"
 mkdir -p "$HOME/.local/share/libcamera/ipa/ipu3"

@@ -1,0 +1,18 @@
+[Unit]
+Description=Bridge Surface Go front camera into a v4l2loopback device (Zoom/Teams/etc.)
+# Optional always-on bridge. NOTE: while running it holds the front camera, so
+# other apps (e.g. Firefox via the PipeWire portal) can't use it at the same
+# time, and the camera stays active. Many people prefer to run the bridge
+# on demand instead:  front-camera-loopback.sh
+After=graphical-session.target wireplumber.service
+PartOf=graphical-session.target
+
+[Service]
+# wait for the v4l2loopback device to exist (created at boot via modules-load.d)
+ExecStartPre=/usr/bin/bash -lc 'for i in $(seq 1 30); do for v in /sys/devices/virtual/video4linux/video*/name; do grep -qiE "Surface Front|loopback|Dummy" "$v" 2>/dev/null && exit 0; done; sleep 1; done; exit 1'
+ExecStart=%h/.local/bin/front-camera-loopback.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

@@ -94,6 +94,43 @@ libcamerify zoom         # …same for Zoom, OBS (or use OBS's PipeWire source),
 **PipeWire camera portal** automatically once the nodes exist — no flags needed on recent
 versions. Pick "Internal front camera" in the site's camera dropdown.
 
+### Zoom / Teams / OBS and other V4L2-only apps
+
+These apps **don't** speak libcamera or the PipeWire camera portal, so the IPU3 cameras
+never show up in them. (And `libcamerify` doesn't help on Ubuntu 24.04 — its
+`v4l2-compat.so` shim isn't built.) The fix is a **virtual webcam**: a `v4l2loopback`
+device fed by the front camera through GStreamer, which any V4L2 app can see.
+
+One-time setup (needs sudo):
+
+```bash
+sudo apt install -y v4l2loopback-dkms
+# load now:
+sudo modprobe v4l2loopback video_nr=20 card_label="Surface Front Camera" exclusive_caps=1
+# (optional) auto-load at boot:
+echo v4l2loopback | sudo tee /etc/modules-load.d/v4l2loopback.conf
+printf 'options v4l2loopback video_nr=20 card_label="Surface Front Camera" exclusive_caps=1\n' \
+  | sudo tee /etc/modprobe.d/v4l2loopback.conf
+```
+
+Then start the bridge and open the app:
+
+```bash
+front-camera-loopback.sh        # runs until Ctrl-C; pipes front cam -> /dev/video20
+# now open Zoom and pick "Surface Front Camera"
+```
+
+Run it **on demand** (start before a call, Ctrl-C after) so the camera isn't held the rest
+of the time. For an always-on bridge instead, enable the bundled user service:
+
+```bash
+systemctl --user enable --now front-camera-loopback.service
+```
+
+`exclusive_caps=1` is important — without it Chromium-based apps (incl. Zoom) won't detect
+the loopback as a capture device. Only the **front** camera is bridged (the rear stalls;
+see below).
+
 ### `snap-photo.sh`
 
 ```
